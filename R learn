@@ -1,0 +1,144 @@
+setwd('C:/Users/לינור/Desktop/R')
+library(class)
+library("Metrics")
+library("FNN")
+df <-read.csv("kc_house.csv")
+df$waterfront=as.factor(df$waterfront)
+df$grade=as.factor(df$grade)
+df$condition= as.factor(df$condition)
+df$date= as.Date(substr(df$date,1,8),format="%Y%m%d")
+
+model1<- lm(df$sqft_living~df$sqft_above)
+df$sqft_living<- replace(df$sqft_living,is.na(df$sqft_living),predict(model1))
+df$condition<-replace(df$condition,is.na(df$condition),3)
+mode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+df$yr_built<-replace(df$yr_built,is.na(df$yr_built),mode(df$yr_built))
+#apply(test, 2, function(x) any(is.na(x)))
+str(df)
+df$grade<-as.numeric(df$grade)
+df$condition<-as.numeric(df$condition)
+df$waterfront<-as.numeric(df$waterfront)
+str(df)
+
+df$renew<-NA
+df$renew[df$yr_renovated>0]<-1
+df$renew[df$yr_renovated==0]<-0
+
+str(df)
+SelectedVars = c("price","bathrooms", "bedrooms" , "sqft_living","sqft_lot", "grade", "sqft_basement",  "floors", "condition","renew","waterfront","sqft_above","sqft_basement" )
+
+sb<- subset(df,select = SelectedVars)
+?subset
+
+sb<-sapply(sb, function(x) (x - min(x, na.rm = T)) / (max(x, na.rm = T) - min(x, na.rm=T)))
+sb<-data.frame(sb)
+#sb$price<- df$price
+set.seed(5)
+
+sampleSize = floor(0.7 * nrow(sb))
+train.index = sample(nrow(sb) ,size= sampleSize, replace = F)
+
+
+train = sb[train.index, ]
+test = sb[-train.index, ]
+
+knnPred = knn.reg(train=train, test=test, y= train$price, k = 5)
+
+MAEknn<-mae(test$price,knnPred$pred)
+
+
+test$knnpred<- knnPred$pred
+MAEknn<-mae(test$price,test$knnpred)
+AllShuffled = sb[sample(nrow(sb),replace=F), ]
+
+folds = cut( 1:nrow(AllShuffled), 
+             breaks = 20, labels=F)
+
+
+Maecrossknn = rep(0,20)
+meanknn= rep(0,6)
+sdknn= rep(0,6)
+x=c(1,3,5,7,9,11,13)
+z=1
+
+for (k in x){
+
+for (i in 1:20) {
+  
+  testIndexes = which(folds == i)
+  
+  testData = AllShuffled[testIndexes, ]
+  trainData = AllShuffled[-testIndexes, ]
+  
+  predcross = knn.reg(train=trainData, test=testData, y= trainData$price, k = k)
+  Maecrossknn[i]=mae(testData$price,predcross$pred)
+  
+
+
+}
+  
+  meanknn[z]=mean(Maecrossknn)
+  sdknn[z]=sd(Maecrossknn)
+  z= z+1
+
+  
+
+
+}
+meanknn
+sdknn
+
+dcross<-data.frame(x,meanknn,sdknn)
+dcross$Kvalue<-x
+
+
+Maecrosslm = rep(0,20)
+Maecrosstree = rep(0,20)
+MaecrossKnn5=rep(0,20)
+library(rpart)
+library(rattle)
+
+for (i in 1:20) {
+  
+  testIndexes = which(folds == i)
+  
+  testData = AllShuffled[testIndexes, ]
+  trainData = AllShuffled[-testIndexes, ]
+  
+  
+  lm = lm(price ~ bathrooms+ bedrooms + sqft_living+
+            grade+ sqft_basement+  floors+ condition,
+          data = trainData)
+  lmPredProb = predict(lm, newdata = testData)
+  
+  Maecrosslm[i]=mae(testData$price,lmPredProb)
+  
+  
+  tree = rpart(price ~ bathrooms+ bedrooms + sqft_living+
+                 grade+ sqft_basement+  floors+ condition,
+               data = trainData, method = "anova",
+               parms = list(split = "information"),
+               control = rpart.control(maxdepth = 5))
+  treePred = predict(tree, newdata= testData,)
+  Maecrosstree[i] = mae(testData$price,treePred)
+  
+  predcross = knn.reg(train=trainData, test=testData, y= trainData$price, k = 5)
+  MaecrossKnn5[i]=mae(testData$price,predcross$pred)
+  
+}
+
+mean(Maecrosslm)
+sd(Maecrosslm)
+mean(Maecrosstree)
+sd(Maecrosstree)
+mean(MaecrossKnn5)
+sd(MaecrossKnn5)
+
+
+
+
+
